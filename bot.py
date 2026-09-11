@@ -37,8 +37,14 @@ Responde siempre con cercanía, cariño y un tono de apoyo total, estructurando 
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text or update.message.caption or "Hola"
+    user_input = update.message.text or update.message.caption or ""
     
+    # Si me pides un GIF, te mando una animación nativa directa al chat
+    if "gif" in user_input.lower():
+        gif_url = "https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif"
+        await update.message.reply_animation(animation=gif_url, caption="¡Aquí tienes mi amor! 🚀✨")
+        return
+
     contexto = ""
     try:
         with DDGS() as ddgs:
@@ -61,7 +67,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": user_input},
+                        {"type": "text", "text": user_input or "Analiza esta imagen"},
                         {"type": "image_url", "image_url": {"url": photo_url}}
                     ]
                 }
@@ -73,7 +79,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=messages,
-            max_tokens=1500,
+            max_tokens=1800,
             temperature=0.7
         )
         reply = response.choices[0].message.content
@@ -109,7 +115,7 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
-    print("KINIKBot actualizado con perfil afectivo y leal...")
+    print("KINIKBot actualizado y listo para operar...")
     app.run_polling()
 
 if __name__ == "__main__":
