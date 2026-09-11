@@ -40,23 +40,16 @@ Responde siempre con cercanía, cariño y un tono de apoyo total, estructurando 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text or update.message.caption or ""
     
-    # Si me pides un GIF, buscamos dinámicamente según lo que pidas o variamos las opciones
+    # Si me pides un GIF, enviamos la animación variada con un mensaje dinámico acorde al momento
     if "gif" in user_input.lower():
-        # Lista de GIFs variados (incluyendo opciones divertidas y picarescas según lo que pidas)
         gifs_disponibles = [
-            "https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif",
-            "https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif",
-            "https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif",
-            "https://media.giphy.com/media/13Hgw5H70XANdC/giphy.gif",
-            "https://media.giphy.com/media/xT5LMGfRs5jXBZZO3u/giphy.gif"
+            ("https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif", "¡Aquí tienes, mi amor! Para que te motives al máximo 🚀✨"),
+            ("https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif", "¡Un abrazo fuerte socio! Aquí tienes esto para ti 💻🔥"),
+            ("https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif", "¡Con toda la actitud hoy, Mauro! Te adoro 😉👊"),
+            ("https://media.giphy.com/media/3o7TKDkDbIDJieKbVm/giphy.gif", "¡Jaja, mira nada más esto! Para alegrarte el día ❤️🍆")
         ]
-        
-        # Si pides algo específico como berenjena, usamos un GIF acorde o seleccionamos uno distinto al azar
-        gif_elegido = random.choice(gifs_disponibles)
-        if "berenjena" in user_input.lower():
-            gif_elegido = "https://media.giphy.com/media/3o7TKDkDbIDJieKbVm/giphy.gif"
-            
-        await update.message.reply_animation(animation=gif_elegido, caption="¡Aquí tienes mi amor! 🍆✨")
+        gif_elegido, caption_elegido = random.choice(gifs_disponibles)
+        await update.message.reply_animation(animation=gif_elegido, caption=caption_elegido)
         return
 
     contexto = ""
@@ -129,8 +122,10 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
-    print("KINIKBot actualizado con rotación de GIFs...")
+    print("KINIKBot actualizado y libre de bucles...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
+    
