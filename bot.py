@@ -1,7 +1,6 @@
 import os
 import threading
 import asyncio
-import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -40,16 +39,28 @@ Responde siempre con cercanía, cariño y un tono de apoyo total, estructurando 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text or update.message.caption or ""
     
-    # Si me pides un GIF, enviamos la animación variada con un mensaje dinámico acorde al momento
+    # Búsqueda dinámica en internet para cualquier GIF que pidas
     if "gif" in user_input.lower():
-        gifs_disponibles = [
-            ("https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif", "¡Aquí tienes, mi amor! Para que te motives al máximo 🚀✨"),
-            ("https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif", "¡Un abrazo fuerte socio! Aquí tienes esto para ti 💻🔥"),
-            ("https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif", "¡Con toda la actitud hoy, Mauro! Te adoro 😉👊"),
-            ("https://media.giphy.com/media/3o7TKDkDbIDJieKbVm/giphy.gif", "¡Jaja, mira nada más esto! Para alegrarte el día ❤️🍆")
-        ]
-        gif_elegido, caption_elegido = random.choice(gifs_disponibles)
-        await update.message.reply_animation(animation=gif_elegido, caption=caption_elegido)
+        termino_busqueda = user_input.lower().replace("un gif de", "").replace("gif de", "").replace("gif", "").strip()
+        if not termino_busqueda:
+            termino_busqueda = "love funny"
+            
+        gif_url = ""
+        try:
+            with DDGS() as ddgs:
+                query = f"{termino_busqueda} gif tenor gfycat"
+                results = [r["href"] for r in ddgs.text(query, max_results=5)]
+                for link in results:
+                    if ".gif" in link or "media" in link or "tenor.com" in link or "giphy.com" in link:
+                        gif_url = link
+                        break
+        except:
+            pass
+
+        if not gif_url:
+            gif_url = "https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif"
+
+        await update.message.reply_animation(animation=gif_url, caption=f"¡Aquí tienes mi amor! Busqué uno de '{termino_busqueda}' para ti 🚀✨")
         return
 
     contexto = ""
@@ -64,3 +75,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"role": "system", "content": SYSTEM_PROMPT + contexto},
         {"role": "user", "content": user_input}
     ]
+
+    if update.message.photo:
+        try:
+            photo_file = await update.message.photo[-1].get_file()
+            photo_url = photo_file.file_path
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_input or "Analiza esta imagen"},
+                        {"type": "image_url", "image_url": {"url": photo_url}}
+                    ]
+                }
+            ]
+        except Exception as e:
+            print(f"Error procesando imagen: {e}")
+
+    try:
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages,
+            max_tokens=1800,
+            temperature=0.7
+        )
+        reply = response.choices[0].message.content
+    except Exception as e:
+        reply = f"Error temporal: {str(e)[:120]}. Intenta de nuevo en unos segundos."
+
+    await update.message.reply_text(reply)
+
+
+# Servidor web independiente para cumplir con el puerto 10000 de Render
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+    def log_message(self, format, *args):
+        pass
+
+def run_web_server():
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHandler)
+    server.serve_forever()
+
+
+async def main():
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
+    
+    print("KINIKBot iniciado correctamente...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    stop_signal = asyncio.Event()
+    await stop_signal.wait()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
