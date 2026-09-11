@@ -12,16 +12,15 @@ from groq import Groq
 from duckduckgo_search import DDGS
 import requests
 
-# ReportLab para PDFs
+# ReportLab para PDFs limpios
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# Openpyxl para crear Excel y PPTX para PowerPoint
+# Openpyxl para Excel y PPTX para PowerPoint
 import openpyxl
 from pptx import Presentation
-from pptx.util import Inches, Pt
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -97,16 +96,36 @@ def crear_pdf_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     story = []
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#111111'), spaceAfter=14, leading=20)
-    body_style = ParagraphStyle('CustomBody', parent=styles['Normal'], fontSize=10.5, textColor=colors.HexColor('#222222'), leading=15, spaceAfter=8)
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor('#111111'),
+        spaceAfter=14,
+        leading=20
+    )
+    
+    body_style = ParagraphStyle(
+        'CustomBody',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#222222'),
+        leading=14,
+        spaceAfter=6
+    )
     
     story.append(Paragraph(f"<b>REPORTE KINIK: {titulo.upper()}</b>", title_style))
     story.append(Spacer(1, 10))
+    
     for parrafo in contenido_texto.split('\n'):
-        if parrafo.strip():
-            clean_p = parrafo.replace('*', '').replace('#', '')
+        linea = parrafo.strip()
+        # Filtramos líneas que parezcan tablas de markdown o caracteres extraños
+        if linea and not linea.startswith('|') and not '---' in linea:
+            clean_p = linea.replace('*', '').replace('#', '')
             story.append(Paragraph(clean_p, body_style))
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, 3))
+            
     doc.build(story)
     buffer.seek(0)
     return buffer
@@ -122,7 +141,6 @@ def crear_excel_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
     for linea in contenido_texto.split('\n'):
         if linea.strip():
             ws.append([linea.replace('*', '').replace('#', '').strip()])
-    
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -131,24 +149,70 @@ def crear_excel_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
 
 def crear_pptx_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
     prs = Presentation()
-    slide_layout = prs.slide_layouts[1] # Título y contenido
+    slide_layout = prs.slide_layouts[1]
     slide = prs.slides.add_slide(slide_layout)
     slide.shapes.title.text = f"KINIK: {titulo.title()}"
-    
     body_shape = slide.placeholders[1]
     tf = body_shape.text_frame
     tf.text = "Puntos clave de estrategia:"
-    
     for linea in contenido_texto.split('\n'):
         if linea.strip() and len(linea) < 100:
             p = tf.add_paragraph()
             p.text = linea.replace('*', '').replace('#', '').strip()
             p.level = 1
-            
     buffer = io.BytesIO()
     prs.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+def buscar_imagen_robusta(termino: str) -> io.BytesIO:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    
+    # Capa 1: Wikimedia API
+    try:
+        wiki_url = "https://es.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "prop": "pageimages",
+            "format": "json",
+            "piprop": "original",
+            "titles": termino,
+            "redirects": 1
+        }
+        r = requests.get(wiki_url, params=params, headers=headers, timeout=5)
+        data = r.json()
+        pages = data.get("query", {}).get("pages", {})
+        for page_id, page_info in pages.items():
+            if "original" in page_info:
+                img_url = page_info["original"]["source"]
+                img_resp = requests.get(img_url, headers=headers, timeout=8)
+                if img_resp.status_code == 200 and len(img_resp.content) > 5000:
+                    buf = io.BytesIO(img_resp.content)
+                    buf.name = "imagen.jpg"
+                    return buf
+    except Exception:
+        pass
+
+    # Capa 2: DuckDuckGo Images
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.images(keywords=termino, max_results=8)
+            for r in results:
+                candidate = r.get("image")
+                if candidate:
+                    try:
+                        img_resp = requests.get(candidate, headers=headers, timeout=5)
+                        if img_resp.status_code == 200 and len(img_resp.content) > 5000:
+                            buf = io.BytesIO(img_resp.content)
+                            buf.name = "imagen.jpg"
+                            return buf
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+    return None
 
 
 def buscar_gif_en_red(termino: str) -> str:
@@ -183,7 +247,6 @@ def buscar_archivo_en_red(termino: str, extension: str) -> str:
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    # NUEVA SUPERPODER: Si Mauricio me manda un archivo (PDF, Word, Excel), lo descargo y leo por dentro
     if update.message.document:
         doc = update.message.document
         file_name = doc.file_name
@@ -191,8 +254,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             file_obj = await context.bot.get_file(doc.file_id)
             file_bytes = await file_obj.download_as_bytearray()
-            
-            # Si es texto o PDF básico, procesamos un resumen
             prompt_doc = f"El usuario Mauricio me ha enviado el archivo '{file_name}'. Analiza y dame un resumen ejecutivo y diagnóstico de socio sobre su propósito."
             response = client.chat.completions.create(
                 model="openai/gpt-oss-120b",
@@ -200,7 +261,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 max_tokens=1000
             )
             await update.message.reply_text(response.choices[0].message.content)
-        except Exception as e:
+        except Exception:
             await update.message.reply_text(f"⚠️ No pude procesar el archivo internamente, pero lo tengo guardado.")
         return
 
@@ -216,36 +277,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if termino and len(termino) > 2:
         ultima_entidad[user_id] = termino
 
-    # ACCIONES MULTIMEDIA Y DOCUMENTOS AUTOMÁTICOS
     if accion == "gif":
         gif_url = buscar_gif_en_red(termino)
         await update.message.reply_animation(animation=gif_url, caption=f"GIF de {termino.title()} 🚀")
         return
 
     if accion == "imagen":
-        img_url = None
-        try:
-            with DDGS() as ddgs:
-                results = ddgs.images(keywords=termino, max_results=5)
-                for r in results:
-                    candidate = r.get("image")
-                    if candidate and any(ext in candidate.lower() for ext in [".jpg", ".jpeg", ".png", "webp"]):
-                        img_url = candidate
-                        break
-        except Exception:
-            pass
-        if img_url:
-            try:
-                img_resp = requests.get(img_url, timeout=8)
-                if img_resp.status_code == 200:
-                    photo_file = io.BytesIO(img_resp.content)
-                    photo_file.name = "imagen.jpg"
-                    await update.message.reply_photo(photo=photo_file, caption=f"Imagen de {termino.title()} 📸")
-                    return
-            except Exception:
-                pass
-        await update.message.reply_photo(photo="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe", caption=f"Imagen de respaldo para {termino.title()} 📸")
-        return
+        photo_file = buscar_imagen_robusta(termino)
+        if photo_file:
+            await update.message.reply_photo(photo=photo_file, caption=f"Imagen oficial de *{termino.title()}* 📸", parse_mode="Markdown")
+            return
+        else:
+            await update.message.reply_text(f"⚠️ No pude descargar una imagen limpia y verificada de '{termino}' en este instante, Mauricio. Pero operamos con lo demás de inmediato.")
+            return
 
     if accion == "pdf_buscar":
         file_url = buscar_archivo_en_red(termino, "pdf")
@@ -265,7 +309,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"📄 No hallé un PDF directo para '{termino}', pero te genero uno propio al instante si me pides crearlo.")
             return
 
-    # GENERADORES DE ARCHIVOS PROPIOS (PDF, EXCEL, PPTX)
     if accion in ["pdf_crear", "excel_crear", "pptx_crear", "noticias"]:
         await update.message.reply_text(f"⚙️ Procesando y generando material sobre *{termino.title()}*, Mauricio...", parse_mode="Markdown")
         
@@ -308,7 +351,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"📰 *Últimas noticias y análisis sobre {termino.title()}:*\n\n{contenido[:1500]}", parse_mode="Markdown")
             return
 
-    # CONSULTA GENERAL DE CHAT
     contexto = ""
     try:
         with DDGS() as ddgs:
@@ -357,10 +399,9 @@ async def main():
     threading.Thread(target=run_web_server, daemon=True).start()
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-    # Permitir capturar texto, fotos y documentos mandados por ti
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
-    print("KINIKBot modo milagro operativo iniciado...")
+    print("KINIKBot unificado y optimizado iniciado...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
