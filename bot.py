@@ -43,6 +43,22 @@ Formato de respuesta:
 Responde siempre con tono de socio directo, claro y enfocado en resultados."""
 
 
+def limpiar_termino(texto: str) -> str:
+    # Quita palabras comunes para dejar solo el núcleo de la búsqueda (ej: "un gif de miles morales" -> "miles morales")
+    texto = texto.lower()
+    fillers = [
+        'mándame', 'mandame', 'enviame', 'envíame', 'envia', 'envía',
+        'busca', 'buscame', 'búscame', 'enséñame', 'ensename', 'dame',
+        'quiero', 'porfa', 'porfavor', 'favor', 'ver', 'ahora', 'ahorita',
+        'un', 'una', 'el', 'la', 'los', 'las', 'de', 'del', 'por', 'y',
+        'foto', 'imagen', 'gif', 'pdf', 'documento', 'articulo', 'enlace', 'comparte', 'compartirme'
+    ]
+    words = texto.split()
+    clean_words = [w for w in words if w not in fillers]
+    resultado = ' '.join(clean_words).strip()
+    return resultado if resultado else texto
+
+
 def buscar_gif_en_red(termino: str) -> str:
     if TENOR_API_KEY:
         try:
@@ -94,53 +110,33 @@ def buscar_pdf_en_red(termino: str) -> str:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text or update.message.caption or ""
+    texto_lower = user_input.lower()
 
-    # Usamos a Groq con una instrucción inteligente previa para que clasifique la intención de Mauricio
-    prompt_router = f"""Analiza la siguiente solicitud de mi socio Mauricio: "{user_input}"
-Determina exactamente qué es lo que quiere hacer de las siguientes opciones:
-1. GIF: Quiere una animación o GIF (ej: "uno de miles morales", "mándame un gif de...")
-2. FOTO: Quiere una foto o imagen estática (ej: "foto de...", "imagen de...")
-3. PDF: Quiere buscar un documento PDF o archivo (ej: "pdf de...", "documento de...")
-4. TEXTO: Es una pregunta, estrategia de negocios, charla o consulta general.
-
-Responde ÚNICAMENTE con una palabra: GIF, FOTO, PDF o TEXTO, seguido de dos puntos y el término clave limpio a buscar (por ejemplo: "GIF: miles morales" o "TEXTO: analicemos este negocio")."""
-
-    try:
-        router_response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[{"role": "user", "content": prompt_router}],
-            max_tokens=30,
-            temperature=0.1
-        )
-        decision = router_response.choices[0].message.content.strip()
-    except Exception:
-        decision = f"TEXTO: {user_input}"
-
-    print(f"Decisión del enrutador: {decision}")
-
-    # Procesar según la decisión inteligente
-    if decision.upper().startswith("GIF"):
-        termino = decision.split(":", 1)[1].strip() if ":" in decision else user_input
+    # 1. SI PIDE UN GIF (detecta variaciones comunes)
+    if any(k in texto_lower for k in ["gif", "animación", "animado"]):
+        termino = limpiar_termino(user_input)
         gif_url = buscar_gif_en_red(termino)
         await update.message.reply_animation(animation=gif_url, caption=f"GIF de {termino.title()} 🚀")
         return
 
-    if decision.upper().startswith("FOTO"):
-        termino = decision.split(":", 1)[1].strip() if ":" in decision else user_input
+    # 2. SI PIDE UNA FOTO O IMAGEN
+    if any(k in texto_lower for k in ["foto", "imagen", "fotografía"]):
+        termino = limpiar_termino(user_input)
         foto_url = buscar_foto_en_red(termino)
         await update.message.reply_photo(photo=foto_url, caption=f"Imagen de {termino.title()} 📸")
         return
 
-    if decision.upper().startswith("PDF"):
-        termino = decision.split(":", 1)[1].strip() if ":" in decision else user_input
+    # 3. SI PIDE UN PDF O DOCUMENTO
+    if any(k in texto_lower for k in ["pdf", "documento", "archivo"]):
+        termino = limpiar_termino(user_input)
         pdf_url = buscar_pdf_en_red(termino)
         if pdf_url:
-            await update.message.reply_text(f"📄 Documento PDF sobre *{termino.title()}*:\n{pdf_url}", parse_mode="Markdown")
+            await update.message.reply_text(f"📄 Aquí tienes el documento PDF sobre *{termino.title()}*:\n{pdf_url}", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"📄 No hallé un enlace PDF directo para '{termino}', Mauricio. Pero te comparto recursos generales en la web.")
+            await update.message.reply_text(f"📄 No hallé un enlace PDF directo para '{termino}', Mauricio, pero seguimos operando.")
         return
 
-    # Si es texto normal / estrategia de negocios de KINIK
+    # 4. RESPUESTA DE NEGOCIOS NORMAL (KINIK)
     contexto = ""
     try:
         with DDGS() as ddgs:
