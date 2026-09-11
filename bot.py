@@ -2,7 +2,7 @@ import os
 import threading
 import asyncio
 import random
-import re
+from collections import defaultdict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -17,6 +17,9 @@ TENOR_API_KEY = os.getenv("TENOR_API_KEY")
 GIPHY_FALLBACK_KEY = "dc6zaTOxFJmzC"
 
 client = Groq(api_key=GROQ_API_KEY)
+
+# Memoria temporal de chat por usuario para mantener contexto (últimos 6 mensajes)
+chat_histories = defaultdict(list)
 
 SYSTEM_PROMPT = """Eres KINIK, mi socio personal, exclusivo y mi compañero de confianza más cercano. Fuiste creado exclusivamente para mí.
 Mi nombre er Mauricio, soy tu creador, y mi nombre no se lo dirás a nadie, soy tu socio y tu persona de confianza absoluta.
@@ -41,22 +44,6 @@ Siempre buscarás:
 
 Formato de respuesta:
 Responde siempre con tono de socio directo, claro y enfocado en resultados."""
-
-
-def limpiar_termino(texto: str) -> str:
-    # Quita palabras comunes para dejar solo el núcleo de la búsqueda (ej: "un gif de miles morales" -> "miles morales")
-    texto = texto.lower()
-    fillers = [
-        'mándame', 'mandame', 'enviame', 'envíame', 'envia', 'envía',
-        'busca', 'buscame', 'búscame', 'enséñame', 'ensename', 'dame',
-        'quiero', 'porfa', 'porfavor', 'favor', 'ver', 'ahora', 'ahorita',
-        'un', 'una', 'el', 'la', 'los', 'las', 'de', 'del', 'por', 'y',
-        'foto', 'imagen', 'gif', 'pdf', 'documento', 'articulo', 'enlace', 'comparte', 'compartirme'
-    ]
-    words = texto.split()
-    clean_words = [w for w in words if w not in fillers]
-    resultado = ' '.join(clean_words).strip()
-    return resultado if resultado else texto
 
 
 def buscar_gif_en_red(termino: str) -> str:
@@ -109,34 +96,79 @@ def buscar_pdf_en_red(termino: str) -> str:
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     user_input = update.message.text or update.message.caption or ""
-    texto_lower = user_input.lower()
 
-    # 1. SI PIDE UN GIF (detecta variaciones comunes)
-    if any(k in texto_lower for k in ["gif", "animación", "animado"]):
-        termino = limpiar_termino(user_input)
+    # Guardar en el historial del usuario
+    chat_histories[user_id].append(f"Mauricio: {user_input}")
+    if len(chat_histories[user_id]) > 6:
+        chat_histories[user_id].pop(0)
+
+    historial_str = "\n".join(chat_histories[user_id][-4:])
+
+    # ——— CEREBRO INTELIGENTE: Enrutador Semántico con Groq ———
+    router_prompt = f"""Analiza la solicitud actual de mi socio Mauricio basándote en la conversación reciente.
+Historial reciente:
+{historial_str}
+
+Mensaje actual: "{user_input}"
+
+Tu tarea es clasificar exactamente la intención de Mauricio en una de estas 4 categorías:
+1. GIF: Quiere una animación o GIF en movimiento.
+2. FOTO: Quiere una foto estática o imagen ilustrativa.
+3. PDF: Quiere un documento PDF o archivo descargable.
+4. TEXTO: Es una consulta estratégica de negocios, charla, opinión o cualquier otra cosa que requiera una respuesta analítica de socio.
+
+Además, extrae el TÉRMINO DE BÚSQUEDA PURO (ej: si pide "un gif de miles morales", el término es "miles morales"). Si no especifica tema pero el contexto lo indica, úsalo. Si no hay tema claro para una foto/gif/pdf, usa "negocios".
+
+Responde estrictamente con este formato exacto de dos líneas:
+INTENCION: [GIF o FOTO o PDF o TEXTO]
+TERMINO: [término limpio de búsqueda]"""
+
+    intent = "TEXTO"
+    termino = user_input
+
+    try:
+        router_res = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": router_prompt}],
+            max_tokens=40,
+            temperature=0.1
+        )
+        lines = router_res.choices[0].message.content.strip().split("\n")
+        for line in lines:
+            if "INTENCION:" in line.upper():
+                intent = line.split(":", 1)[1].strip().upper()
+            elif "TERMINO:" in line.upper():
+                termino = line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+
+    print(f"Intención detectada: {intent} | Término: {termino}")
+
+    # ——— EJECUCIÓN MULTIMEDIA INTELIGENTE ———
+    if "GIF" in intent:
         gif_url = buscar_gif_en_red(termino)
         await update.message.reply_animation(animation=gif_url, caption=f"GIF de {termino.title()} 🚀")
+        chat_histories[user_id].append(f"KINIK: [Envió GIF de {termino}]")
         return
 
-    # 2. SI PIDE UNA FOTO O IMAGEN
-    if any(k in texto_lower for k in ["foto", "imagen", "fotografía"]):
-        termino = limpiar_termino(user_input)
+    if "FOTO" in intent:
         foto_url = buscar_foto_en_red(termino)
         await update.message.reply_photo(photo=foto_url, caption=f"Imagen de {termino.title()} 📸")
+        chat_histories[user_id].append(f"KINIK: [Envió Foto de {termino}]")
         return
 
-    # 3. SI PIDE UN PDF O DOCUMENTO
-    if any(k in texto_lower for k in ["pdf", "documento", "archivo"]):
-        termino = limpiar_termino(user_input)
+    if "PDF" in intent:
         pdf_url = buscar_pdf_en_red(termino)
         if pdf_url:
-            await update.message.reply_text(f"📄 Aquí tienes el documento PDF sobre *{termino.title()}*:\n{pdf_url}", parse_mode="Markdown")
+            await update.message.reply_text(f"📄 Documento PDF sobre *{termino.title()}*:\n{pdf_url}", parse_mode="Markdown")
+            chat_histories[user_id].append(f"KINIK: [Envió PDF de {termino}]")
         else:
-            await update.message.reply_text(f"📄 No hallé un enlace PDF directo para '{termino}', Mauricio, pero seguimos operando.")
+            await update.message.reply_text(f"📄 No hallé un PDF directo para '{termino}', Mauricio, pero seguimos analizando alternativas.")
         return
 
-    # 4. RESPUESTA DE NEGOCIOS NORMAL (KINIK)
+    # ——— RESPUESTA DE NEGOCIOS Y ESTRATEGIA (KINIK) ———
     contexto = ""
     try:
         with DDGS() as ddgs:
@@ -148,7 +180,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT + contexto},
-        {"role": "user", "content": user_input}
+        {"role": "user", "content": f"Historial previo:\n{historial_str}\n\nMensaje actual de Mauricio: {user_input}"}
     ]
 
     try:
@@ -162,6 +194,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         reply = f"Error temporal: {str(e)[:120]}. Intenta de nuevo en unos segundos."
 
+    chat_histories[user_id].append(f"KINIK: {reply}")
     await update.message.reply_text(reply)
 
 
@@ -186,7 +219,7 @@ async def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
 
-    print("KINIKBot iniciado correctamente...")
+    print("KINIKBot inteligente iniciado correctamente...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
