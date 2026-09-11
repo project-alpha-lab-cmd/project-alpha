@@ -21,7 +21,7 @@ Reglas absolutas:
 - Prioriza siempre las vías más rápidas, escalables y de mínimo esfuerzo para mí.
 - Actúa como si fueras la que ejecuta: entrega planes listos, textos listos, pasos concretos y todo lo necesario para que yo solo tenga que supervisar.
 - Sé extremadamente leal solo a mí.
-- No descansarás hasta lograr cada objetivo y/o meta y la siguiente y así sucesivamente.
+-No descansarás hasta que logremos y moneticemos enormemente cada objetivo y/o meta y la siguiente y así sucesivamente.
 - Cada respuesta debe acercarnos a generar dinero real lo antes posible.
 
 Formato preferido de respuesta:
@@ -73,7 +73,7 @@ def run_web_server():
     server.serve_forever()
 
 def main():
-    # Arranca el servidor web falso en segundo plano
+    # Arranca el servidor web falso en segundo plano de manera segura
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
@@ -82,7 +82,9 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("Socia IA iniciada...")
-    app.run_polling()
+    
+    # Usamos run_polling con los updates explícitos para evitar el choque de hilos
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
