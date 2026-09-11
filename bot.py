@@ -43,23 +43,6 @@ Formato de respuesta:
 Responde siempre con tono de socio directo, claro y enfocado en resultados."""
 
 
-def limpiar_termino(user_input: str, tipo: str) -> str:
-    text = user_input.lower()
-    match = re.search(rf'(?:{tipo})\s*(?:de\s+)?(.+)', text)
-    term = match.group(1) if match else text
-    term = re.sub(r'[^\wáéíóúüñ\s]', ' ', term, flags=re.UNICODE)
-
-    fillers = {
-        'mándame', 'mandame', 'enviame', 'envíame', 'envia', 'envía',
-        'busca', 'buscame', 'búscame', 'enséñame', 'ensename', 'dame',
-        'quiero', 'porfa', 'porfavor', 'favor', 'enserio', 'serio',
-        'ver', 'ahora', 'ahorita', 'un', 'una', 'el', 'la', 'los', 'las',
-        'de', 'del', 'por', 'foto', 'imagen', 'gif', 'pdf', 'documento', 'articulo', 'enlace'
-    }
-    words = [w for w in term.split() if w not in fillers]
-    return ' '.join(words).strip() or "trending"
-
-
 def buscar_gif_en_red(termino: str) -> str:
     if TENOR_API_KEY:
         try:
@@ -98,71 +81,66 @@ def buscar_foto_en_red(termino: str) -> str:
     return "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe"
 
 
-def buscar_enlace_web(termino: str):
+def buscar_pdf_en_red(termino: str) -> str:
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.text(termino, max_results=3))
+            results = list(ddgs.text(f"{termino} filetype:pdf", max_results=3))
             if results:
-                r = results[0]
-                url = r.get("href")
-                titulo = r.get("title")
-                cuerpo = r.get("body")
-                img_url = buscar_foto_en_red(termino)
-                return titulo, url, cuerpo, img_url
+                return results[0].get("href")
     except Exception:
         pass
-    return None, None, None, None
+    return None
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text or update.message.caption or ""
-    texto_lower = user_input.lower()
 
-    # 1. GIFs
-    if "gif" in texto_lower:
-        termino = limpiar_termino(user_input, "gif")
+    # Usamos a Groq con una instrucción inteligente previa para que clasifique la intención de Mauricio
+    prompt_router = f"""Analiza la siguiente solicitud de mi socio Mauricio: "{user_input}"
+Determina exactamente qué es lo que quiere hacer de las siguientes opciones:
+1. GIF: Quiere una animación o GIF (ej: "uno de miles morales", "mándame un gif de...")
+2. FOTO: Quiere una foto o imagen estática (ej: "foto de...", "imagen de...")
+3. PDF: Quiere buscar un documento PDF o archivo (ej: "pdf de...", "documento de...")
+4. TEXTO: Es una pregunta, estrategia de negocios, charla o consulta general.
+
+Responde ÚNICAMENTE con una palabra: GIF, FOTO, PDF o TEXTO, seguido de dos puntos y el término clave limpio a buscar (por ejemplo: "GIF: miles morales" o "TEXTO: analicemos este negocio")."""
+
+    try:
+        router_response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": prompt_router}],
+            max_tokens=30,
+            temperature=0.1
+        )
+        decision = router_response.choices[0].message.content.strip()
+    except Exception:
+        decision = f"TEXTO: {user_input}"
+
+    print(f"Decisión del enrutador: {decision}")
+
+    # Procesar según la decisión inteligente
+    if decision.upper().startswith("GIF"):
+        termino = decision.split(":", 1)[1].strip() if ":" in decision else user_input
         gif_url = buscar_gif_en_red(termino)
         await update.message.reply_animation(animation=gif_url, caption=f"GIF de {termino.title()} 🚀")
         return
 
-    # 2. Fotos o imágenes estáticas
-    if "foto" in texto_lower or "imagen" in texto_lower:
-        termino = limpiar_termino(user_input, "(?:foto|imagen)")
+    if decision.upper().startswith("FOTO"):
+        termino = decision.split(":", 1)[1].strip() if ":" in decision else user_input
         foto_url = buscar_foto_en_red(termino)
         await update.message.reply_photo(photo=foto_url, caption=f"Imagen de {termino.title()} 📸")
         return
 
-    # 3. Artículos o enlaces web con vista previa visual
-    if "articulo" in texto_lower or "enlace" in texto_lower or "web" in texto_lower or "pagina" in texto_lower:
-        termino = limpiar_termino(user_input, "(?:articulo|enlace|web|pagina)")
-        titulo, url, cuerpo, img_url = buscar_enlace_web(termino)
-        
-        if url:
-            mensaje_card = f"🔗 *{titulo}*\n\n{cuerpo}\n\n[🔗 Abrir sitio web]({url})"
-            await update.message.reply_photo(photo=img_url, caption=mensaje_card, parse_mode="Markdown")
-        else:
-            await update.message.reply_text("No encontré un enlace exacto para eso. Intenta con otro término.")
-        return
-
-    # 4. PDFs o documentos
-    if "pdf" in texto_lower or "documento" in texto_lower:
-        termino = limpiar_termino(user_input, "(?:pdf|documento)")
-        pdf_url = None
-        try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(f"{termino} filetype:pdf", max_results=3))
-                if results:
-                    pdf_url = results[0].get("href")
-        except Exception:
-            pass
-
+    if decision.upper().startswith("PDF"):
+        termino = decision.split(":", 1)[1].strip() if ":" in decision else user_input
+        pdf_url = buscar_pdf_en_red(termino)
         if pdf_url:
             await update.message.reply_text(f"📄 Documento PDF sobre *{termino.title()}*:\n{pdf_url}", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"📄 No hallé un PDF directo para '{termino}'.")
+            await update.message.reply_text(f"📄 No hallé un enlace PDF directo para '{termino}', Mauricio. Pero te comparto recursos generales en la web.")
         return
 
-    # 5. Respuestas estratégicas normales de KINIK
+    # Si es texto normal / estrategia de negocios de KINIK
     contexto = ""
     try:
         with DDGS() as ddgs:
