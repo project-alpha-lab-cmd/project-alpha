@@ -1,5 +1,6 @@
 import os
 import threading
+import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -60,25 +61,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(reply)
 
-# Servidor web falso obligatorio para Render (corre en segundo plano)
+# Servidor web obligatorio para Render en el puerto 10000
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is alive!")
     def log_message(self, format, *args):
-        pass # Evita saturar los logs con peticiones web
+        pass
 
 def run_web_server():
     server = HTTPServer(('0.0.0.0', 10000), SimpleHandler)
     server.serve_forever()
 
 def main():
-    # Iniciar el servidor web en un hilo independiente
+    # 1. Arrancar el servidor web inmediatamente en segundo plano
     web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
 
-    # Iniciar el bot de Telegram en el hilo principal
+    # 2. Asegurar un Event Loop limpio y activo para Python 3.14 en el hilo principal
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 3. Arrancar el bot de Telegram
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("KINIKBot iniciado correctamente...")
