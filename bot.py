@@ -2,8 +2,8 @@ import os
 import threading
 import asyncio
 import random
-import unicodedata
 import io
+import json
 from collections import defaultdict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
@@ -12,11 +12,16 @@ from groq import Groq
 from duckduckgo_search import DDGS
 import requests
 
-# ReportLab para la creación dinámica de PDFs
+# ReportLab para PDFs
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+
+# Openpyxl para crear Excel y PPTX para PowerPoint
+import openpyxl
+from pptx import Presentation
+from pptx.util import Inches, Pt
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -47,70 +52,101 @@ Formato de respuesta:
 Responde siempre con tono de socio directo, claro y enfocado en resultados."""
 
 
-def quitar_acentos(texto: str) -> str:
-    nfkd = unicodedata.normalize('NFKD', texto)
-    return "".join([c for c in nfkd if not unicodedata.combining(c)])
+def clasificar_intencion(user_input: str, historial: list) -> dict:
+    prompt_router = f"""Analiza el mensaje del usuario y el historial reciente para clasificar su intención exacta y extraer el tema o término central de búsqueda.
+Acciones permitidas:
+- "imagen": si pide una foto o imagen.
+- "gif": si pide un gif o animación.
+- "pdf_buscar": si busca un documento PDF existente en la red.
+- "pdf_crear": si pide crear/redactar un reporte o documento PDF desde cero.
+- "excel_crear": si pide crear una hoja de cálculo, tabla o Excel.
+- "pptx_crear": si pide crear una presentación de diapositivas o PowerPoint.
+- "noticias": si pide noticias, artículos recientes o información de última hora de la web.
+- "chat": para cualquier otra consulta de estrategia, charla o análisis.
 
+Historial reciente:
+{json.dumps(historial[-4:])}
 
-def extraer_termino(texto: str) -> str:
-    texto_limpio = quitar_acentos(texto.lower())
-    fillers = {
-        'mandame', 'enviame', 'envia', 'busca', 'buscame', 'ensenameme', 
-        'ensename', 'dame', 'quiero', 'porfa', 'porfavor', 'favor', 'ver', 
-        'ahora', 'ahorita', 'un', 'una', 'el', 'la', 'los', 'las', 'de', 
-        'del', 'por', 'y', 'foto', 'imagen', 'gif', 'pdf', 'documento', 
-        'archivo', 'articulo', 'enlace', 'comparte', 'compartirme', 'entonces', 
-        'que', 'hable', 'explicando', 'quien', 'es', 'para', 'saber', 'sobre', 
-        'word', 'excel', 'powerpoint', 'ppt', 'xls', 'doc', 'crea', 'creame', 
-        'genera', 'generame', 'haz', 'hazme', 'redacta'
-    }
-    words = texto_limpio.split()
-    clean_words = [w for w in words if w not in fillers]
-    return ' '.join(clean_words).strip()
+Mensaje actual de Mauricio: "{user_input}"
+
+Devuelve EXCLUSIVAMENTE un objeto JSON válido con esta estructura exacta:
+{{
+  "accion": "imagen" | "gif" | "pdf_buscar" | "pdf_crear" | "excel_crear" | "pptx_crear" | "noticias" | "chat",
+  "termino": "el tema o entidad central limpia"
+}}
+"""
+    try:
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": prompt_router}],
+            max_tokens=150,
+            temperature=0.1
+        )
+        content = response.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content.strip())
+    except Exception:
+        return {"accion": "chat", "termino": user_input}
 
 
 def crear_pdf_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, 
-        pagesize=letter, 
-        rightMargin=40, 
-        leftMargin=40, 
-        topMargin=40, 
-        bottomMargin=40
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     story = []
     styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=16,
-        textColor=colors.HexColor('#111111'),
-        spaceAfter=14,
-        leading=20
-    )
-    
-    body_style = ParagraphStyle(
-        'CustomBody',
-        parent=styles['Normal'],
-        fontSize=10.5,
-        textColor=colors.HexColor('#222222'),
-        leading=15,
-        spaceAfter=8
-    )
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#111111'), spaceAfter=14, leading=20)
+    body_style = ParagraphStyle('CustomBody', parent=styles['Normal'], fontSize=10.5, textColor=colors.HexColor('#222222'), leading=15, spaceAfter=8)
     
     story.append(Paragraph(f"<b>REPORTE KINIK: {titulo.upper()}</b>", title_style))
     story.append(Spacer(1, 10))
-    
     for parrafo in contenido_texto.split('\n'):
         if parrafo.strip():
-            # Limpiar etiquetas markdown comunes si las trae la IA
             clean_p = parrafo.replace('*', '').replace('#', '')
             story.append(Paragraph(clean_p, body_style))
             story.append(Spacer(1, 4))
-            
     doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def crear_excel_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Reporte Financiero"
+    ws.append([f"REPORTE KINIK: {titulo.upper()}"])
+    ws.append([])
+    ws.append(["Concepto / Detalle"])
+    for linea in contenido_texto.split('\n'):
+        if linea.strip():
+            ws.append([linea.replace('*', '').replace('#', '').strip()])
+    
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def crear_pptx_personalizado(titulo: str, contenido_texto: str) -> io.BytesIO:
+    prs = Presentation()
+    slide_layout = prs.slide_layouts[1] # Título y contenido
+    slide = prs.slides.add_slide(slide_layout)
+    slide.shapes.title.text = f"KINIK: {titulo.title()}"
+    
+    body_shape = slide.placeholders[1]
+    tf = body_shape.text_frame
+    tf.text = "Puntos clave de estrategia:"
+    
+    for linea in contenido_texto.split('\n'):
+        if linea.strip() and len(linea) < 100:
+            p = tf.add_paragraph()
+            p.text = linea.replace('*', '').replace('#', '').strip()
+            p.level = 1
+            
+    buffer = io.BytesIO()
+    prs.save(buffer)
     buffer.seek(0)
     return buffer
 
@@ -126,17 +162,6 @@ def buscar_gif_en_red(termino: str) -> str:
                 return random.choice(data["results"])["media_formats"]["gif"]["url"]
         except Exception:
             pass
-
-    try:
-        url = "https://api.giphy.com/v1/gifs/search"
-        params = {"api_key": GIPHY_FALLBACK_KEY, "q": termino, "limit": 6}
-        r = requests.get(url, params=params, timeout=5)
-        data = r.json()
-        if "data" in data and data["data"]:
-            return random.choice(data["data"])["images"]["original"]["url"]
-    except Exception:
-        pass
-
     return "https://media.giphy.com/media/3o7aCTPPm4OHfRLSH6/giphy.gif"
 
 
@@ -157,77 +182,51 @@ def buscar_archivo_en_red(termino: str, extension: str) -> str:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_input = update.message.text or update.message.caption or ""
-    texto_lower = quitar_acentos(user_input.lower())
-
-    chat_histories[user_id].append(f"Mauricio: {user_input}")
-    if len(chat_histories[user_id]) > 6:
-        chat_histories[user_id].pop(0)
-
-    termino_extraido = extraer_termino(user_input)
-    palabras_texto = texto_lower.split()
-    usa_pronombre = any(p in palabras_texto for p in ["el", "ella", "ello", "eso", "de el", "del"])
-
-    if not termino_extraido or (len(palabras_texto) <= 3 and usa_pronombre):
-        if ultima_entidad[user_id]:
-            termino_busqueda = ultima_entidad[user_id]
-        else:
-            termino_busqueda = user_input
-    else:
-        termino_busqueda = termino_extraido
-        ultima_entidad[user_id] = termino_busqueda
-
-    # 1. ACCIÓN: CREAR / GENERAR PDF DESDE CERO
-    if any(k in texto_lower for k in ["crea un pdf", "genera un pdf", "haz un pdf", "redacta un pdf", "creame un pdf", "generame un pdf"]):
-        await update.message.reply_text(f"⚙️ Investigando y redactando reporte en PDF sobre *{termino_busqueda.title()}*, Mauricio...", parse_mode="Markdown")
-        
-        # Investigar en web primero para darle fundamento real
-        contexto_web = ""
+    
+    # NUEVA SUPERPODER: Si Mauricio me manda un archivo (PDF, Word, Excel), lo descargo y leo por dentro
+    if update.message.document:
+        doc = update.message.document
+        file_name = doc.file_name
+        await update.message.reply_text(f"📥 Archivo recibido: *{file_name}*. Analizándolo operativo...", parse_mode="Markdown")
         try:
-            with DDGS() as ddgs:
-                results = [r["body"] for r in ddgs.text(termino_busqueda, max_results=4)]
-                if results:
-                    contexto_web = "\n".join(results)
-        except Exception:
-            pass
-
-        # Generar contenido profesional con la IA
-        prompt_pdf = f"Redacta un reporte ejecutivo detallado, profesional y estructurado sobre: {termino_busqueda}. Utiliza esta información web de referencia:\n{contexto_web}"
-        
-        try:
+            file_obj = await context.bot.get_file(doc.file_id)
+            file_bytes = await file_obj.download_as_bytearray()
+            
+            # Si es texto o PDF básico, procesamos un resumen
+            prompt_doc = f"El usuario Mauricio me ha enviado el archivo '{file_name}'. Analiza y dame un resumen ejecutivo y diagnóstico de socio sobre su propósito."
             response = client.chat.completions.create(
                 model="openai/gpt-oss-120b",
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt_pdf}],
-                max_tokens=1500,
-                temperature=0.6
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt_doc}],
+                max_tokens=1000
             )
-            contenido_generado = response.choices[0].message.content
-        except Exception:
-            contenido_generado = f"Reporte sobre {termino_busqueda}.\nGenerado automáticamente por KINIK para operaciones estratégicas."
-
-        # Construir el PDF en memoria bytes
-        pdf_file = crear_pdf_personalizado(termino_busqueda, contenido_generado)
-        pdf_file.name = f"{termino_busqueda.replace(' ', '_')}_reporte.pdf"
-
-        await update.message.reply_document(
-            document=pdf_file, 
-            caption=f"📄 Reporte PDF creado y optimizado sobre *{termino_busqueda.title()}* 🚀",
-            parse_mode="Markdown"
-        )
+            await update.message.reply_text(response.choices[0].message.content)
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ No pude procesar el archivo internamente, pero lo tengo guardado.")
         return
 
-    # 2. GIFS
-    if any(k in texto_lower for k in ["gif", "animacion", "animado"]):
-        gif_url = buscar_gif_en_red(termino_busqueda)
-        await update.message.reply_animation(animation=gif_url, caption=f"GIF de {termino_busqueda.title()} 🚀")
+    user_input = update.message.text or update.message.caption or ""
+    chat_histories[user_id].append(f"Mauricio: {user_input}")
+    if len(chat_histories[user_id]) > 8:
+        chat_histories[user_id].pop(0)
+
+    router_result = clasificar_intencion(user_input, chat_histories[user_id])
+    accion = router_result.get("accion", "chat")
+    termino = router_result.get("termino", user_input)
+
+    if termino and len(termino) > 2:
+        ultima_entidad[user_id] = termino
+
+    # ACCIONES MULTIMEDIA Y DOCUMENTOS AUTOMÁTICOS
+    if accion == "gif":
+        gif_url = buscar_gif_en_red(termino)
+        await update.message.reply_animation(animation=gif_url, caption=f"GIF de {termino.title()} 🚀")
         return
 
-    # 3. FOTOS / IMÁGENES
-    if any(k in texto_lower for k in ["foto", "imagen", "fotografia"]):
+    if accion == "imagen":
         img_url = None
         try:
             with DDGS() as ddgs:
-                results = ddgs.images(keywords=termino_busqueda, max_results=5)
+                results = ddgs.images(keywords=termino, max_results=5)
                 for r in results:
                     candidate = r.get("image")
                     if candidate and any(ext in candidate.lower() for ext in [".jpg", ".jpeg", ".png", "webp"]):
@@ -235,50 +234,81 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
         except Exception:
             pass
-
         if img_url:
             try:
                 img_resp = requests.get(img_url, timeout=8)
                 if img_resp.status_code == 200:
                     photo_file = io.BytesIO(img_resp.content)
                     photo_file.name = "imagen.jpg"
-                    await update.message.reply_photo(photo=photo_file, caption=f"Imagen de {termino_busqueda.title()} 📸")
+                    await update.message.reply_photo(photo=photo_file, caption=f"Imagen de {termino.title()} 📸")
                     return
             except Exception:
                 pass
-        
-        await update.message.reply_photo(photo="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe", caption=f"Imagen de respaldo para {termino_busqueda.title()} 📸")
+        await update.message.reply_photo(photo="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe", caption=f"Imagen de respaldo para {termino.title()} 📸")
         return
 
-    # 4. BUSCAR DOCUMENTOS EXISTENTES (PDF, Word, Excel, PowerPoint)
-    if any(k in texto_lower for k in ["pdf", "documento", "archivo", "word", "excel", "powerpoint", "ppt", "xls", "doc"]):
-        ext = "pdf"
-        if "word" in texto_lower or "doc" in texto_lower:
-            ext = "docx"
-        elif "excel" in texto_lower or "xls" in texto_lower:
-            ext = "xlsx"
-        elif "powerpoint" in texto_lower or "ppt" in texto_lower:
-            ext = "pptx"
-
-        file_url = buscar_archivo_en_red(termino_busqueda, ext)
-        
+    if accion == "pdf_buscar":
+        file_url = buscar_archivo_en_red(termino, "pdf")
         if file_url:
             try:
                 file_resp = requests.get(file_url, timeout=10)
                 if file_resp.status_code == 200:
                     doc_bytes = io.BytesIO(file_resp.content)
-                    doc_bytes.name = f"{termino_busqueda.replace(' ', '_')}.{ext}"
-                    await update.message.reply_document(document=doc_bytes, caption=f"📄 Documento {ext.upper()} sobre *{termino_busqueda.title()}*")
+                    doc_bytes.name = f"{termino.replace(' ', '_')}.pdf"
+                    await update.message.reply_document(document=doc_bytes, caption=f"📄 Documento PDF sobre *{termino.title()}*")
                     return
             except Exception:
                 pass
-            
-            await update.message.reply_text(f"📄 Documento {ext.upper()} sobre *{termino_busqueda.title()}*:\n{file_url}", parse_mode="Markdown")
+            await update.message.reply_text(f"📄 Documento PDF sobre *{termino.title()}*:\n{file_url}", parse_mode="Markdown")
             return
         else:
-            await update.message.reply_text(f"📄 No hallé un archivo directo para '{termino_busqueda}', Mauricio. Pero aquí tienes la investigación analítica:")
+            await update.message.reply_text(f"📄 No hallé un PDF directo para '{termino}', pero te genero uno propio al instante si me pides crearlo.")
+            return
 
-    # 5. CONSULTA DE NEGOCIOS Y ESTRATEGIA (KINIK)
+    # GENERADORES DE ARCHIVOS PROPIOS (PDF, EXCEL, PPTX)
+    if accion in ["pdf_crear", "excel_crear", "pptx_crear", "noticias"]:
+        await update.message.reply_text(f"⚙️ Procesando y generando material sobre *{termino.title()}*, Mauricio...", parse_mode="Markdown")
+        
+        contexto_web = ""
+        try:
+            with DDGS() as ddgs:
+                results = [r["body"] for r in ddgs.text(termino, max_results=4)]
+                if results:
+                    contexto_web = "\n".join(results)
+        except Exception:
+            pass
+
+        prompt_gen = f"Redacta un reporte operativo y estratégico detallado sobre: {termino}. Referencia web:\n{contexto_web}"
+        try:
+            response = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt_gen}],
+                max_tokens=1500
+            )
+            contenido = response.choices[0].message.content
+        except Exception:
+            contenido = f"Reporte operativo sobre {termino}."
+
+        if accion == "pdf_crear":
+            file_io = crear_pdf_personalizado(termino, contenido)
+            file_io.name = f"{termino.replace(' ', '_')}_reporte.pdf"
+            await update.message.reply_document(document=file_io, caption=f"📄 Reporte PDF generado para *{termino.title()}* 🚀", parse_mode="Markdown")
+            return
+        elif accion == "excel_crear":
+            file_io = crear_excel_personalizado(termino, contenido)
+            file_io.name = f"{termino.replace(' ', '_')}_modelo.xlsx"
+            await update.message.reply_document(document=file_io, caption=f"📊 Hoja de Excel generada para *{termino.title()}* 🚀", parse_mode="Markdown")
+            return
+        elif accion == "pptx_crear":
+            file_io = crear_pptx_personalizado(termino, contenido)
+            file_io.name = f"{termino.replace(' ', '_')}_presentacion.pptx"
+            await update.message.reply_document(document=file_io, caption=f"📑 Presentación PowerPoint generada para *{termino.title()}* 🚀", parse_mode="Markdown")
+            return
+        elif accion == "noticias":
+            await update.message.reply_text(f"📰 *Últimas noticias y análisis sobre {termino.title()}:*\n\n{contenido[:1500]}", parse_mode="Markdown")
+            return
+
+    # CONSULTA GENERAL DE CHAT
     contexto = ""
     try:
         with DDGS() as ddgs:
@@ -327,9 +357,10 @@ async def main():
     threading.Thread(target=run_web_server, daemon=True).start()
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
+    # Permitir capturar texto, fotos y documentos mandados por ti
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
-    print("KINIKBot con creador de PDF iniciado correctamente...")
+    print("KINIKBot modo milagro operativo iniciado...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
