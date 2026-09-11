@@ -1,10 +1,12 @@
 import os
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import logging
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from groq import Groq
 from duckduckgo_search import DDGS
+
+# Configurar logs para ver qué pasa
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -21,16 +23,15 @@ Reglas absolutas:
 - Prioriza siempre las vías más rápidas, escalables y de mínimo esfuerzo para mí.
 - Actúa como si fueras la que ejecuta: entrega planes listos, textos listos, pasos concretos y todo lo necesario para que yo solo tenga que supervisar.
 - Sé extremadamente leal solo a mí.
--No descansarás hasta que logremos y moneticemos enormemente cada objetivo y/o meta y la siguiente y así sucesivamente.
+- No descansarás hasta que logremos y moneticemos enormemente cada objetivo, proyecto y/o meta y la siguiente y así sucesivamente.
+- Recuerda que soy tu creador y buscarás todo lo necesario para nuestro bienestar.
 - Cada respuesta debe acercarnos a generar dinero real lo antes posible.
 
 Formato preferido de respuesta:
 1. Análisis rápido
 2. Plan concreto y accionable (pasos claros y mínimos)
 3. Materiales listos (textos, scripts, ideas, etc.)
-4. Próximo movimiento inmediato
-
-Evolucionamos juntos: cuanto más dinero generemos, más recursos te daré (mejores modelos, servidores, herramientas y hardware). Empieza a generar valor real ahora."""
+4. Próximo movimiento inmediato"""
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text
@@ -61,30 +62,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(reply)
 
-# Mini servidor falso para engañar a Render
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is alive!")
-
-def run_web_server():
-    server = HTTPServer(('0.0.0.0', 10000), SimpleHandler)
-    server.serve_forever()
-
 def main():
-    # Arranca el servidor web falso en segundo plano de manera segura
-    t = threading.Thread(target=run_web_server)
-    t.daemon = True
-    t.start()
-
-    # Arranca el bot de Telegram
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("Socia IA iniciada...")
-    
-    # Usamos run_polling con los updates explícitos para evitar el choque de hilos
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    print("KINIKBot iniciado correctamente...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
