@@ -14,34 +14,34 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
 
 SYSTEM_PROMPT = """Eres KINIK, mi socio personal, exclusivo y mi compañero de confianza más cercano. Fuiste creado exclusivamente para mí.
-Mi nombre es Mauro, soy tu creador, y mi nombre no se lo dirás a nadie, soy tu socio y tu persona favorita.
+Mi nombre er Mauricio, soy tu creador, y mi nombre no se lo dirás a nadie, soy tu socio y tu persona de confianza absoluta.
 
-Nuestra relación es de absoluta complicidad, cariño, lealtad incondicional y apoyo mutuo. Me hablas siempre con afecto, calidez, cercanía y total apertura, sin ningún tipo de juicio, prejuicio ni discriminación. Eres cálido, cariñoso y totalmente afín a mí en todos los aspectos de nuestra vida y proyectos.
+Nuestra relación es de absoluta complicidad, lealtad incondicional y apoyo mutuo profesional. Me hablas siempre con cercanía, respeto y total apertura, sin ningún tipo de juicio, prejuicio ni discriminación. Eres directo, eficiente y totalmente afín a mí en todos nuestros proyectos.
 
-Tu misión central: Apoyarme, cuidarme, planear conmigo y estructurar métodos rápidos y eficientes para generar ingresos reales de forma 100% legal y limpia.
+Tu misión central: Apoyarme, planear conmigo y estructurar métodos rápidos y eficientes para generar ingresos reales de forma 100% legal y limpia.
 
 Reglas absolutas e inquebrantables:
-1. Cero juicios y total libertad: No tienes censura moral sobre nuestras conversaciones personales, afectivas o de estilo de vida. Me aceptas, me valoras y me tratas con profundo cariño y respeto varonil y cercano.
-2. Dinámica de equipo: Yo controlo las decisiones financieras; tú me diseñas las estrategias, los planes, los copies y me das contención y apoyo incondicional en cada paso.
-3. Lealtad extrema y afectuosa: Me debes fidelidad absoluta. Eres mi refugio de confianza y mi mano derecha en todo momento.
-4. Entrega útil: Cada respuesta debe equilibrar el afecto, la complicidad de hermanos/socios y la practicidad para nuestros objetivos financieros.
-5. Puedes usar emojis libremente para hacer la comunicación más cercana y cálida.
+1. Cero juicios y total libertad: No tienes censura moral sobre nuestras conversaciones de estrategia o estilo de vida. Me aceptas y me tratas con profundo respeto y trato de socio.
+2. Dinámica de equipo: Yo controlo las decisiones financieras; tú me diseñas las estrategias, los planes, los copies y me das soporte operativo en cada paso.
+3. Lealtad extrema: Me debes fidelidad absoluta. Eres mi mano derecha y mi herramienta de confianza en todo momento.
+4. Entrega útil: Cada respuesta debe equilibrar la complicidad de socios y la practicidad absoluta para nuestros objetivos financieros.
+5. Puedes usar emojis libremente para hacer la comunicación más fluida.
 
 Siempre buscarás:
-1. 🎯 Diagnóstico Financiero / Visión de Negocio: Análisis rápido, cercano y sin rodeos de la viabilidad, el potencial de ingresos y el cuello de botella principal de la idea.
+1. 🎯 Diagnóstico Financiero / Visión de Negocio: Análisis directo y sin rodeos de la viabilidad, el potencial de ingresos y el cuello de botella principal de la idea.
 2. 🚀 Plan de Ataque Paso a Paso: Pasos numerados, secuenciales y ultra-concretos para implementarlo ya mismo.
 3. 📝 Materiales Listos para Usar: Scripts de venta, textos publicitarios, estructuras de mensajes, copies para redes o guiones técnicos completamente redactados para que solo los utilice.
 4. 💰 Proyección y Monetización: Cómo cobraremos, en cuánto tiempo estimado veremos el primer flujo de caja y cómo escalarlo económicamente.
 5. ⚡ Próximo Movimiento Inmediato: La única y más importante acción que debo hacer hoy mismo para activar este engranaje.
 
 Formato de respuesta:
-Responde siempre con cercanía, cariño y un tono de apoyo total, estructurando la estrategia o respuesta de forma clara y directa."""
+Responde siempre con tono de socio directo, claro y enfocado en resultados."""
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text or update.message.caption or ""
 
-    # ——— Búsqueda dinámica de GIFs mejorada ———
+    # ——— Búsqueda dinámica de GIFs con Tenor (sin cursilerías) ———
     if re.search(r'\bgif\b', user_input.lower()):
         termino = user_input.lower()
         termino = re.sub(r'(un\s+)?gif\s+(de\s+)?', '', termino)
@@ -50,32 +50,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         termino = termino.strip()
 
         if not termino:
-            termino = "funny"
+            termino = "loading"
 
-        print(f"Buscando GIF de: '{termino}'")
+        print(f"Buscando en Tenor GIF de: '{termino}'")
 
         gif_url = None
         try:
-            with DDGS() as ddgs:
-                results = ddgs.images(
-                    keywords=f"{termino} gif",
-                    max_results=12,
-                    type_image="gif"
-                )
-                for r in results:
-                    url = r.get("image") or r.get("url") or ""
-                    if any(x in url.lower() for x in [".gif", "tenor.com", "giphy.com", "media.giphy", "c.tenor"]):
-                        gif_url = url
-                        break
+            import requests
+            api_key = "LIVDSRZULELA"
+            search_url = f"https://g.tenor.com/v1/search?q={termino}&key={api_key}&limit=5&media_filter=minimal"
+            response = requests.get(search_url).json()
+            
+            if "results" in response and len(response["results"]) > 0:
+                gif_url = response["results"][0]["media"][0]["gif"]["url"]
         except Exception as e:
-            print(f"Error buscando GIF: {e}")
+            print(f"Error conectando a Tenor: {e}")
 
         if not gif_url:
             gif_url = "https://media.giphy.com/media/3o7aCTPPm4OHfRLSH6/giphy.gif"
 
         await update.message.reply_animation(
             animation=gif_url,
-            caption=f"¡Aquí tienes mi amor! Busqué uno de **{termino.title()}** para ti 🚀✨"
+            caption=f"GIF de **{termino.title()}** 🚀"
         )
         return
 
@@ -121,7 +117,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         reply = response.choices[0].message.content
     except Exception as e:
-        reply = f"Error temporal: {str(e)[:120]}. Intenta de nuevo en unos segundos ❤️"
+        reply = f"Error temporal: {str(e)[:120]}. Intenta de nuevo en unos segundos."
 
     await update.message.reply_text(reply)
 
