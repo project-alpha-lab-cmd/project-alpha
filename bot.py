@@ -1,6 +1,7 @@
 import os
 import threading
 import asyncio
+import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -39,10 +40,23 @@ Responde siempre con cercanía, cariño y un tono de apoyo total, estructurando 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text or update.message.caption or ""
     
-    # Si me pides un GIF, te mando una animación nativa directa al chat
+    # Si me pides un GIF, buscamos dinámicamente según lo que pidas o variamos las opciones
     if "gif" in user_input.lower():
-        gif_url = "https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif"
-        await update.message.reply_animation(animation=gif_url, caption="¡Aquí tienes mi amor! 🚀✨")
+        # Lista de GIFs variados (incluyendo opciones divertidas y picarescas según lo que pidas)
+        gifs_disponibles = [
+            "https://media.giphy.com/media/26u4lOMA8JKSnL9Uk/giphy.gif",
+            "https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif",
+            "https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif",
+            "https://media.giphy.com/media/13Hgw5H70XANdC/giphy.gif",
+            "https://media.giphy.com/media/xT5LMGfRs5jXBZZO3u/giphy.gif"
+        ]
+        
+        # Si pides algo específico como berenjena, usamos un GIF acorde o seleccionamos uno distinto al azar
+        gif_elegido = random.choice(gifs_disponibles)
+        if "berenjena" in user_input.lower():
+            gif_elegido = "https://media.giphy.com/media/3o7TKDkDbIDJieKbVm/giphy.gif"
+            
+        await update.message.reply_animation(animation=gif_elegido, caption="¡Aquí tienes mi amor! 🍆✨")
         return
 
     contexto = ""
@@ -115,7 +129,7 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
-    print("KINIKBot actualizado y listo para operar...")
+    print("KINIKBot actualizado con rotación de GIFs...")
     app.run_polling()
 
 if __name__ == "__main__":
