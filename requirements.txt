@@ -1,4 +1,7 @@
 python-telegram-bot
 groq
-duckduckgo_search
+duckduckgo-search
 requests
+reportlab
+openpyxl
+python-pptx
